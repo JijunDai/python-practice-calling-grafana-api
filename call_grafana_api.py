@@ -26,7 +26,7 @@ def get_all_alerts_id(config, headers):
         return None
     return id_map
 
-def mget_alert_notification_by_id(alert_id, config, headers, set_notify_uid, alert_path):
+def mget_alert_notification_by_id(alert_id, alert_path, config, headers, set_notify_uid):
     '''get alert notification by alert id'''
     alert_notify_map = {}
     url = config["BASE_URL"] + "/api/alerts/" + str(alert_id)
@@ -36,6 +36,16 @@ def mget_alert_notification_by_id(alert_id, config, headers, set_notify_uid, ale
     s = set(alert_notify_map['uid'])
     if set_notify_uid in s:
         print(f"\n- Name: {alert_notify_map['name']}\n{config['BASE_URL']}{alert_path}?viewPanel={alert_notify_map['panelid']}&orgId={alert_notify_map['orgid']}")
+
+def error_check(obj,msg_code):
+    if obj is None:
+        match msg_code:
+            case 1:
+                print("Error: can not connect to Grafana, or invalid API key probably")
+            case _:
+                pass
+        return False
+    return True
 
 
 def main():
@@ -48,38 +58,34 @@ def main():
     args_config = vars(args)
 
     config = dotenv_values(".env")
-    headers = { "Authorization" : "Bearer {}".format(config['GRAFANAID_TOKEN']),
+    headers = { "Authorization" : "Bearer {}".format(config['P1_TOKEN']),
         "Accept" : "application/json",
         "Content-Type" : "application/json"
     }
     
     if args_config['notify']:
-        if (all_notify_map := get_all_notification(config, headers)) is None:
-            print("Error: invalid API key probably")
-            exit(1)
-        for value in all_notify_map:
-            print(all_notify_map[value])
+        all_notify_map = get_all_notification(config, headers)
+        if error_check(all_notify_map,1):
+            for value in all_notify_map.values():
+                print(value)
         exit(0)
-            
+                
     if args_config['notify_uid']:
         set_notify_uid = args_config['notify_uid']
     else:
         set_notify_uid = config['OPSGENIE_NOTIFY_UID']
 
+    alert_id_map = get_all_alerts_id(config, headers)
     procs = []
+    if error_check(alert_id_map,1):
+        for alert_id, alert_path in alert_id_map.items():
+            proc = Process(target=mget_alert_notification_by_id, args=(alert_id, alert_path, config, headers, set_notify_uid))
+            procs.append(proc)
+            proc.start()
 
-    if (alert_id_map := get_all_alerts_id(config, headers)) is None:
-        print("Error: invalid API key probably")
-        exit(1)
-    
-    for alert_id in alert_id_map.keys():
-        proc = Process(target=mget_alert_notification_by_id, args=(alert_id,config,headers,set_notify_uid,alert_id_map[alert_id],))
-        procs.append(proc)
-        proc.start()
-
-    # complete the multi-processes
-    for proc in procs:
-        proc.join()
+        # complete the multi-processes
+        for proc in procs:
+            proc.join()
 
 
 if __name__ == "__main__":
